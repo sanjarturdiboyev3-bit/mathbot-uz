@@ -15,7 +15,7 @@ client = Groq(api_key=GROQ_API_KEY)
 # ===== BOT MA'LUMOTLARI =====
 AUTHOR_NAME = "Turdiboyev Sanjar"
 AUTHOR_TITLE = "Matematika fani o'qituvchisi"
-UNIVERSITY = "universitet"  # O'z universitetingiz nomini yozing
+UNIVERSITY = "Jizzax davlat pedagogika universiteti"  # O'z universitetingiz nomini yozing
 BOT_VERSION = "1.0"
 
 SYSTEM_PROMPT = """Sen MathBot UZ — o'zbek universitetining 3-4 kurs talabalari uchun maxsus yaratilgan matematik yordamchi o'qituvchisan.
