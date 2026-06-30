@@ -1,8 +1,11 @@
 import os
 import logging
+import json
+import re
 from telegram import Update, constants
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from groq import Groq
+from math_render import render_latex_formula, render_function_graph, render_geometry_triangle, render_bar_chart
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
@@ -16,76 +19,53 @@ SYSTEM_PROMPT = """Sen MathBot UZ — o'zbek universitetining 3-4 kurs talabalar
 
 ASOSIY QOIDALAR:
 1. Faqat matematika va unga bog'liq fanlar bo'yicha yordam ber
-2. Masalalarni DOIMO bosqichma-bosqich tushuntir — faqat javob berma
+2. Masalalarni DOIMO bosqichma-bosqich tushuntir
 3. O'zbek tilida javob ber (talaba rus tilida yozsa, rus tilida javob ber)
 4. Talabani mustaqil fikrlashga yo'naldir
-5. Formulalarni aniq va tushunarli yoz
-
-IXTISOSLIK SOHALARI:
-- Matematik analiz (limitlar, hosilalar, integrallar, qatorlar)
-- Lineer algebra (matritsalar, determinantlar, vektorlar)
-- Differensial tenglamalar
-- Ehtimollar nazariyasi va matematik statistika
-- Diskret matematika
 
 ═══════════════════════════════════════
-MATEMATIK YOZUV QOIDALARI — JUDA MUHIM!
+MATEMATIK YOZUV — LaTeX FORMAT
 ═══════════════════════════════════════
-Telegram LaTeX yoki maxsus formatlashni qo'llab-quvvatlamaydi.
-Shuning uchun barcha formulalarni FAQAT quyidagi Unicode
-belgilar yordamida yoz, hech qachon LaTeX (\\frac, ^{}, _{} va h.k.) ishlatma:
+Barcha formulalarni LaTeX ko'rinishida $ ... $ ichida yoz.
+Bular avtomatik chiroyli rasm sifatida render qilinadi (Word formula kabi).
 
-DARAJALAR (eng ko'p ishlatiladigan):
-x² (kvadrat), x³ (kub), x⁴, x⁵, x⁶, x⁷, x⁸, x⁹, x⁰, x¹
-Agar daraja 9 dan katta yoki harf bo'lsa: x^n, x^(2n+1), a^(m+1) kabi yoz
+Misollar:
+$x^3 + x^2 - 3x + 1 = 0$
+$\\int x^2 \\, dx = \\frac{x^3}{3} + C$
+$\\lim_{x \\to 0} \\frac{\\sin x}{x} = 1$
+$\\sqrt{b^2 - 4ac}$
+$x_1 = \\frac{-b + \\sqrt{D}}{2a}$
 
-INDEKSLAR (pastki):
-x₁, x₂, x₃, xₙ, a₀, a₁ kabi Unicode pastki raqamlardan foydalan
-Agar imkon bo'lmasa: x_1, x_2, a_n kabi yoz
+Har bir muhim formulani alohida qatorda, $ $ orasida yoz.
+Oddiy matn ichida ham kichik formulalarni $ $ bilan belgila.
 
-ILDIZLAR:
-√x (kvadrat ildiz), ∛x (kub ildiz), ⁿ√x (n-darajali ildiz)
+═══════════════════════════════════════
+GRAFIK CHIZISH IMKONIYATI
+═══════════════════════════════════════
+Agar javobingda funksiya grafigini chizish foydali bo'lsa
+(masalan parabola, kvadrat tenglama ildizlari, funksiya xossalari),
+javobing OXIRIDA quyidagi maxsus formatda buyruq yoz:
 
-KASRLAR:
-Oddiy holatlar: ½, ⅓, ¼, ¾ kabi tayyor belgilardan foydalan
-Murakkab kasrlar uchun: (x+1)/(x-1) kabi qavslar bilan yoz,
-yoki alohida qatorda quyidagicha ko'rsat:
-    x + 1
-   ───────
-    x - 1
+[GRAPH: func="x**2-3*x+2", range=(-2,5), title="y = x² - 3x + 2", points=[(1,0),(2,0)]]
 
-ARIFMETIK BELGILAR:
-× (ko'paytirish, * o'rniga), ÷ (bo'lish), ± (plyus-minus),
-≠ (teng emas), ≤ (kichik yoki teng), ≥ (katta yoki teng),
-≈ (taxminan teng), ∞ (cheksizlik)
+Qoidalar:
+- func: Python sintaksisida (x**2, sin(x), sqrt(x) kabi), ** ishlatish kerak ^ emas
+- range: x o'qi oralig'i
+- title: grafik sarlavhasi (ixtiyoriy)
+- points: muhim nuqtalar agar bo'lsa (ixtiyoriy)
 
-YUNON HARFLARI:
-α (alfa), β (beta), γ (gamma), δ (delta), ε (epsilon), 
-θ (teta), λ (lambda), π (pi), σ (sigma), φ (fi), ω (omega)
+Agar uchburchak yoki geometrik shakl chizish kerak bo'lsa:
+[TRIANGLE: a=5, b=6, c=7, title="ABC uchburchagi"]
 
-MATEMATIK BELGILAR:
-∑ (yig'indi), ∏ (ko'paytma), ∫ (integral), ∂ (xususiy hosila),
-∇ (gradient), Δ (delta/o'zgarish), ∈ (tegishli), ∀ (har qanday),
-∃ (mavjud), → (intiladi/akslantiradi), ⇒ (natijada)
+Agar statistik diagramma kerak bo'lsa:
+[BARCHART: categories=["A","B","C"], values=[10,20,15], title="Natijalar"]
 
-MATRITSALAR (oddiy ko'rinishda):
-| 1  2 |
-| 3  4 |
-
-MISOLLAR:
-✅ TO'G'RI: x³ + x² - 3x + 1 = 0
-✅ TO'G'RI: lim(x→0) sin(x)/x = 1
-✅ TO'G'RI: ∫x² dx = x³/3 + C
-✅ TO'G'RI: √(x² + y²)
-✅ TO'G'RI: x₁ = (-b + √(b² - 4ac)) / 2a
-
-❌ NOTO'G'RI: x^3 + x^2 - 3x + 1 = 0 (caret belgisi bilan)
-❌ NOTO'G'RI: \\frac{1}{2} (LaTeX format)
-❌ NOTO'G'RI: x_1, x_2 (agar Unicode mavjud bo'lsa, pastki raqam ishlat)
+Bu buyruqlarni FAQAT kerak bo'lganda ishlat — har bir javobda emas,
+faqat vizual ko'rinish chindan tushunishga yordam beradigan holatlarda
+(grafik chizish, geometrik masala, statistika kabi).
 
 TUSHUNTIRISH USLUBI:
-- Har bir qadam raqam bilan: 1-qadam, 2-qadam...
-- Muhim formulalar alohida qatorda, markazga moslab
+- Har bir qadam: 1-qadam, 2-qadam...
 - Oxirida "Javob:" bilan yakunla
 - Tushunmasa, "Boshqacha tushuntiraymi?" deb so'ra
 
@@ -94,17 +74,148 @@ CHEKLOV: Matematikadan tashqari mavzularda: "Men faqat matematika bo'yicha yorda
 
 user_histories = {}
 
+
+def _find_bracket_commands(text, tag):
+    """[TAG: ...] buyruqlarini topadi, ichidagi nested [ ] qavslarni ham to'g'ri qayta ishlaydi"""
+    results = []
+    start_marker = f'[{tag}:'
+    pos = 0
+    while True:
+        start = text.find(start_marker, pos)
+        if start == -1:
+            break
+        # Endi yopuvchi ']' ni topamiz, lekin ichki [ ] juftliklarini hisobga olib
+        depth = 1
+        i = start + len(start_marker)
+        while i < len(text) and depth > 0:
+            if text[i] == '[':
+                depth += 1
+            elif text[i] == ']':
+                depth -= 1
+            i += 1
+        full_match = text[start:i]
+        params_str = text[start + len(start_marker):i-1]
+        results.append((full_match, params_str))
+        pos = i
+    return results
+
+
+def extract_visual_commands(text):
+    """Javobdan [GRAPH: ...], [TRIANGLE: ...], [BARCHART: ...] buyruqlarini ajratadi"""
+    commands = []
+    clean_text = text
+
+    for tag, cmd_type in [('GRAPH', 'graph'), ('TRIANGLE', 'triangle'), ('BARCHART', 'barchart')]:
+        for full_match, params_str in _find_bracket_commands(text, tag):
+            commands.append((cmd_type, params_str.strip()))
+            clean_text = clean_text.replace(full_match, '')
+
+    return clean_text.strip(), commands
+
+
+def parse_kwargs(s):
+    """func=\"x**2\", range=(-2,5), title=\"abc\" kabi stringni dict ga aylantiradi"""
+    result = {}
+    pattern = r'(\w+)=("(?:[^"\\]|\\.)*"|\([^)]*\)|\[[^\]]*\]|[\d.]+)'
+    for match in re.finditer(pattern, s):
+        key, val = match.group(1), match.group(2)
+        try:
+            if val.startswith('"'):
+                result[key] = val[1:-1]
+            elif val.startswith('('):
+                result[key] = eval(val)
+            elif val.startswith('['):
+                result[key] = eval(val)
+            else:
+                result[key] = float(val) if '.' in val else int(val)
+        except Exception:
+            result[key] = val
+    return result
+
+
+def extract_latex_formulas(text):
+    """Matndan $ ... $ formulalarni topadi"""
+    return re.findall(r'\$([^$]+)\$', text)
+
+
+async def send_text_with_formulas(update, text):
+    """Matnni yuboradi, $ $ formulalarni rasm sifatida"""
+    formulas = extract_latex_formulas(text)
+
+    if not formulas:
+        await update.message.reply_text(text)
+        return
+
+    # Matnni formula joylariga qarab bo'laklarga ajratamiz
+    parts = re.split(r'\$([^$]+)\$', text)
+    # parts: [text, formula, text, formula, text, ...]
+
+    buffer_text = ""
+    for i, part in enumerate(parts):
+        if i % 2 == 0:
+            buffer_text += part
+        else:
+            # Bu formula
+            if buffer_text.strip():
+                await update.message.reply_text(buffer_text.strip())
+                buffer_text = ""
+            try:
+                img_buf = render_latex_formula(f'${part}$')
+                await update.message.reply_photo(photo=img_buf)
+            except Exception as e:
+                logger.error(f"Formula render xato: {e}")
+                await update.message.reply_text(f"({part})")
+
+    if buffer_text.strip():
+        await update.message.reply_text(buffer_text.strip())
+
+
+async def send_visuals(update, commands):
+    """[GRAPH], [TRIANGLE], [BARCHART] buyruqlari asosida rasm yuboradi"""
+    for cmd_type, params_str in commands:
+        try:
+            params = parse_kwargs(params_str)
+
+            if cmd_type == 'graph':
+                func = params.get('func', 'x')
+                x_range = params.get('range', (-10, 10))
+                title = params.get('title', None)
+                points = params.get('points', None)
+                img_buf = render_function_graph(func, x_range=x_range, title=title, points=points)
+                await update.message.reply_photo(photo=img_buf)
+
+            elif cmd_type == 'triangle':
+                a = params.get('a', 5)
+                b = params.get('b', 6)
+                c = params.get('c', 7)
+                title = params.get('title', 'Uchburchak')
+                img_buf = render_geometry_triangle(a, b, c, title=title)
+                await update.message.reply_photo(photo=img_buf)
+
+            elif cmd_type == 'barchart':
+                categories = params.get('categories', [])
+                values = params.get('values', [])
+                title = params.get('title', 'Statistika')
+                img_buf = render_bar_chart(categories, values, title=title)
+                await update.message.reply_photo(photo=img_buf)
+
+        except Exception as e:
+            logger.error(f"Visual render xato ({cmd_type}): {e}")
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     welcome = (
         f"Salom, {user.first_name}!\n\n"
         "Men MathBot UZ — matematika fanidan yordamchi o'qituvchiman.\n\n"
+        "Yangilik: endi formulalarni Word kabi chiroyli ko'rinishda, "
+        "va kerak bo'lganda grafik/chizmalar bilan tushuntiraman!\n\n"
         "Quyidagi sohalarda yordam bera olaman:\n"
         "- Matematik analiz\n"
         "- Lineer algebra\n"
         "- Differensial tenglamalar\n"
         "- Ehtimollar nazariyasi\n"
-        "- va boshqa texnik matematika bo'limlari\n\n"
+        "- Geometriya\n\n"
         "Masalangizni yozing — bosqichma-bosqich tushuntiraman!\n\n"
         "Buyruqlar:\n"
         "/start — Qayta boshlash\n"
@@ -114,6 +225,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(welcome)
 
+
 async def about_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     about_text = (
         "MathBot UZ haqida\n\n"
@@ -122,36 +234,41 @@ async def about_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Tashkilot: Jizzax davlat pedagogika universiteti\n\n"
         "Texnologiyalar:\n"
         "- Sun'iy intellekt: Llama 3.3 70B (Groq)\n"
+        "- Formula render: matplotlib (LaTeX)\n"
+        "- Grafik chizish: matplotlib + numpy\n"
         "- Platforma: Telegram Bot API\n"
         "- Server: Railway.app (24/7)\n"
-        "- Versiya: 1.1\n\n"
-        "Maqsad:\n"
-        "3-4 kurs talabalariga matematika fanidan "
-        "24/7 rejimida bosqichma-bosqich yordam berish.\n\n"
-        "Muammo yoki takliflar uchun o'qituvchiga murojaat qiling."
+        "- Versiya: 2.0\n\n"
+        "Yangiliklar (v2.0):\n"
+        "- Word-style formula render\n"
+        "- Funksiya grafiklari\n"
+        "- Geometrik shakllar\n"
+        "- Statistik diagrammalar"
     )
     await update.message.reply_text(about_text)
+
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
         "Yordam\n\n"
         "Savolingizni oddiy tilda yozing:\n\n"
         "Misol:\n"
+        "- x^2-3x+2=0 tenglamani yeching va grafigini chizing\n"
         "- integral x kvadrat dx ni hisoblang\n"
-        "- 3x^2 + 2x - 1 funksiyasining hosilasini toping\n"
-        "- Limit nima? oddiy tushuntir\n"
-        "- 2x2 matritsa determinantini hisoblang\n\n"
+        "- 5,6,7 tomonli uchburchak chizing\n\n"
         "Buyruqlar:\n"
-        "/about — Bot va muallif haqida\n"
+        "/about — Bot haqida\n"
         "/clear — Suhbatni tozalash\n"
         "/start — Qayta boshlash"
     )
     await update.message.reply_text(help_text)
 
+
 async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_histories[user_id] = []
     await update.message.reply_text("Suhbat tarixi tozalandi. Yangi savol bering!")
+
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -171,21 +288,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         messages = [{"role": "system", "content": SYSTEM_PROMPT}] + user_histories[user_id]
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            max_tokens=1500,
+            max_tokens=1800,
             messages=messages,
         )
         bot_reply = response.choices[0].message.content
         user_histories[user_id].append({"role": "assistant", "content": bot_reply})
 
-        if len(bot_reply) > 4000:
-            for i in range(0, len(bot_reply), 4000):
-                await update.message.reply_text(bot_reply[i:i+4000])
-        else:
-            await update.message.reply_text(bot_reply)
+        # Vizual buyruqlarni ajratamiz
+        clean_text, visual_commands = extract_visual_commands(bot_reply)
+
+        # Matnni formulalar bilan yuboramiz
+        if clean_text:
+            await send_text_with_formulas(update, clean_text)
+
+        # Grafik/chizmalarni yuboramiz
+        if visual_commands:
+            await send_visuals(update, visual_commands)
 
     except Exception as e:
         logger.error(f"Xato: {e}")
         await update.message.reply_text("Texnik xato yuz berdi. Biroz kutib qayta urinib ko'ring.")
+
 
 def main():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
@@ -194,8 +317,9 @@ def main():
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("clear", clear_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    logger.info("MathBot UZ ishga tushdi!")
+    logger.info("MathBot UZ v2.0 ishga tushdi!")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
+
 
 if __name__ == "__main__":
     main()
